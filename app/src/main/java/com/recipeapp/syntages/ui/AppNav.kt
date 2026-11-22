@@ -38,8 +38,14 @@ private enum class TopDest(val route: String, val label: String, val icon: Image
 }
 
 @Composable
-fun SyntagesApp() {
+fun SyntagesApp(sharedUrl: String? = null, onSharedUrlHandled: () -> Unit = {}) {
     val nav = rememberNavController()
+    androidx.compose.runtime.LaunchedEffect(sharedUrl) {
+        if (sharedUrl != null) {
+            nav.navigate("edit/0?url=" + android.net.Uri.encode(sharedUrl))
+            onSharedUrlHandled()
+        }
+    }
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
     val top = TopDest.entries.firstOrNull { it.route == route }
@@ -66,6 +72,7 @@ fun SyntagesApp() {
                 RecipesRoute(
                     onOpenRecipe = { nav.navigate("recipe/$it") },
                     onAdd = { nav.navigate("edit/0") },
+                    onImportUrl = { nav.navigate("edit/0?url=" + android.net.Uri.encode(it)) },
                     onEdit = { nav.navigate("edit/$it") },
                     onCook = { nav.navigate("cook/$it") },
                 )
@@ -80,9 +87,15 @@ fun SyntagesApp() {
                     onDeleted = { nav.popBackStack() },
                 )
             }
-            composable("edit/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
+            composable(
+                "edit/{id}?url={url}",
+                arguments = listOf(
+                    navArgument("id") { type = NavType.LongType },
+                    navArgument("url") { type = NavType.StringType; nullable = true; defaultValue = null },
+                ),
+            ) { entry ->
                 val id = entry.arguments?.getLong("id") ?: 0L
-                RecipeEditScreen(recipeId = id) { savedId ->
+                RecipeEditScreen(recipeId = id, importUrl = entry.arguments?.getString("url")) { savedId ->
                     nav.popBackStack()
                     // Μετά τη δημιουργία νέας συνταγής, άνοιξέ την.
                     if (id == 0L && savedId != null) nav.navigate("recipe/$savedId")

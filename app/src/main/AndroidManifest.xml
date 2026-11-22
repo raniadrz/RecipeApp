@@ -3,6 +3,8 @@
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Μόνο για την εισαγωγή συνταγής από link· όλα τα υπόλοιπα δουλεύουν χωρίς internet. -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <queries>
         <intent>
@@ -11,6 +13,10 @@
         <intent>
             <action android:name="android.intent.action.SEND" />
             <data android:mimeType="text/plain" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
         </intent>
         <intent>
             <action android:name="android.intent.action.SENDTO" />
@@ -34,10 +40,17 @@
             android:name=".MainActivity"
             android:exported="true"
             android:resizeableActivity="true"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- «Κοινοποίηση» από τον browser → εισαγωγή συνταγής -->
+            <intent-filter android:label="Αποθήκευση συνταγής">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
 

@@ -16,7 +16,9 @@ import com.recipeapp.syntages.domain.IngredientParser
 import com.recipeapp.syntages.domain.Sections
 import com.recipeapp.syntages.domain.Text
 import com.recipeapp.syntages.domain.Units
+import com.recipeapp.syntages.domain.WebRecipe
 import com.recipeapp.syntages.util.PhotoStore
+import com.recipeapp.syntages.util.RecipeImporter
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicLong
 
@@ -61,6 +63,14 @@ class RecipeEditViewModel(private val app: Application, private val repo: Recipe
     val ingredients = mutableStateListOf<IngredientDraft>()
     val steps = mutableStateListOf<StepDraft>()
     var titleError by mutableStateOf(false)
+
+    // ---- Εισαγωγή από internet ----
+    var importing by mutableStateOf(false)
+        private set
+    var importError by mutableStateOf<String?>(null)
+    var importMessage by mutableStateOf<String?>(null)
+    private var sourceUrl: String? = null
+    var autoImportDone = false
 
     /** Φωτογραφίες που δημιουργήθηκαν σε αυτή την επεξεργασία (για καθαρισμό αν δεν αποθηκευτούν). */
     private val newPhotos = mutableSetOf<String>()
@@ -141,6 +151,58 @@ class RecipeEditViewModel(private val app: Application, private val repo: Recipe
         }
     }
 
+    fun importFromUrl(rawUrl: String) {
+        val url = RecipeImporter.extractUrl(rawUrl.trim()) ?: run {
+            importError = "Αυτό δεν μοιάζει με link. Αντίγραψε τη διεύθυνση της σελίδας (ξεκινά με https://)."
+            return
+        }
+        importing = true
+        importError = null
+        viewModelScope.launch {
+            runCatching { RecipeImporter.load(url) }
+                .onSuccess { apply(it) }
+                .onFailure {
+                    importError = "Δεν ήταν δυνατή η εισαγωγή: ${it.message ?: "χωρίς σύνδεση στο internet;"}"
+                }
+            importing = false
+        }
+    }
+
+    private suspend fun apply(w: WebRecipe) {
+        if (w.title.isNotBlank()) title = w.title
+        w.category?.let { category = it }
+        if (w.prepMinutes > 0) prep = w.prepMinutes.toString()
+        if (w.cookMinutes > 0) cook = w.cookMinutes.toString()
+        w.servings?.let { servings = it.toString() }
+        w.tags.forEach { if (it !in tags) tags += it }
+        if (w.ingredients.isNotEmpty()) {
+            ingredients.clear()
+            w.ingredients.mapNotNull { IngredientParser.parse(it) }.forEach {
+                ingredients += IngredientDraft(it.name, Text.formatQuantity(it.quantity), it.unit, Sections.guess(it.name))
+            }
+            if (ingredients.isEmpty()) ingredients += IngredientDraft()
+        }
+        if (w.steps.isNotEmpty()) {
+            steps.clear()
+            w.steps.forEach { steps += StepDraft(it) }
+        }
+        sourceUrl = w.sourceUrl
+        importMessage = if (w.isComplete)
+            "Η συνταγή συμπληρώθηκε! Έλεγξέ τη και πάτα «Αποθήκευση»."
+        else
+            "Βρέθηκε μόνο ο τίτλος — η σελίδα δεν έχει τα υλικά σε μορφή που διαβάζεται. Συμπλήρωσέ τα με «Επικόλληση»."
+        w.imageUrl?.let { img ->
+            photoBusy = true
+            val name = RecipeImporter.downloadImage(app, img)
+            if (name != null) {
+                photo?.let { if (it in newPhotos) { PhotoStore.delete(app, it); newPhotos.remove(it) } }
+                newPhotos += name
+                photo = name
+            }
+            photoBusy = false
+        }
+    }
+
     fun removePhoto() {
         photo?.let { if (it in newPhotos) { PhotoStore.delete(app, it); newPhotos.remove(it) } }
         photo = null
@@ -167,6 +229,7 @@ class RecipeEditViewModel(private val app: Application, private val repo: Recipe
             tags = Catalog.tags.filter { it in tags },
             photoPath = photo,
             steps = steps.map { it.text.trim() }.filter { it.isNotEmpty() },
+            notes = if (base.notes.isBlank() && sourceUrl != null) "Πηγή: $sourceUrl" else base.notes,
         )
         viewModelScope.launch {
             val newId = repo.saveRecipe(recipe, ings)

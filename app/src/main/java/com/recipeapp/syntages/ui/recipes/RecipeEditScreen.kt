@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -82,9 +83,16 @@ import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun RecipeEditScreen(recipeId: Long, onDone: (savedId: Long?) -> Unit) {
+fun RecipeEditScreen(recipeId: Long, importUrl: String? = null, onDone: (savedId: Long?) -> Unit) {
     val vm = appViewModel(key = "edit_$recipeId") { RecipeEditViewModel(it.app, it.repository, recipeId) }
     val context = LocalContext.current
+    var linkDialog by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(importUrl) {
+        if (!importUrl.isNullOrBlank() && !vm.autoImportDone) {
+            vm.autoImportDone = true
+            vm.importFromUrl(importUrl)
+        }
+    }
     var confirmExit by remember { mutableStateOf(false) }
     var pasteIngredients by remember { mutableStateOf(false) }
     var pasteSteps by remember { mutableStateOf(false) }
@@ -127,6 +135,7 @@ fun RecipeEditScreen(recipeId: Long, onDone: (savedId: Long?) -> Unit) {
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                if (recipeId == 0L) ImportCard(vm) { linkDialog = true }
                 // ---- Βασικά στοιχεία + φωτογραφία ----
                 if (wide) {
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -180,6 +189,20 @@ fun RecipeEditScreen(recipeId: Long, onDone: (savedId: Long?) -> Unit) {
             text = { Text("Οι αλλαγές που έκανες θα χαθούν.") },
             confirmButton = { TextButton(onClick = { confirmExit = false; onDone(null) }) { Text("Έξοδος") } },
             dismissButton = { TextButton(onClick = { confirmExit = false }) { Text("Συνέχεια επεξεργασίας") } },
+        )
+    }
+    if (linkDialog) {
+        LinkDialog(
+            onDismiss = { linkDialog = false },
+            onImport = { linkDialog = false; vm.importFromUrl(it) },
+        )
+    }
+    vm.importMessage?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { vm.importMessage = null },
+            title = { Text("Εισαγωγή από internet") },
+            text = { Text(msg) },
+            confirmButton = { TextButton(onClick = { vm.importMessage = null }) { Text("Εντάξει") } },
         )
     }
     if (pasteIngredients) {
@@ -413,6 +436,57 @@ private fun PasteDialog(title: String, hint: String, onDismiss: () -> Unit, onCo
             )
         },
         confirmButton = { TextButton(onClick = { onConfirm(text) }, enabled = text.isNotBlank()) { Text("Προσθήκη") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Ακύρωση") } },
+    )
+}
+
+@Composable
+private fun ImportCard(vm: RecipeEditViewModel, onLink: () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Βρήκες τη συνταγή στο internet;", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Βάλε το link και θα συμπληρωθούν αυτόματα τίτλος, φωτογραφία, υλικά και βήματα. " +
+                    "Ή, από τον browser, πάτα «Κοινοποίηση» → «Οι Συνταγές μου».",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (vm.importing) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Διαβάζω τη συνταγή…")
+                }
+            } else {
+                Button(onClick = onLink) {
+                    Icon(Icons.Filled.Link, null); Spacer(Modifier.width(6.dp)); Text("Εισαγωγή από link")
+                }
+            }
+            vm.importError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
+        }
+    }
+}
+
+@Composable
+private fun LinkDialog(onDismiss: () -> Unit, onImport: (String) -> Unit) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var url by remember {
+        val clip = clipboard.getText()?.text
+        mutableStateOf(com.recipeapp.syntages.util.RecipeImporter.extractUrl(clip) ?: "")
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Εισαγωγή από link") },
+        text = {
+            OutlinedTextField(
+                value = url, onValueChange = { url = it },
+                label = { Text("Διεύθυνση σελίδας") },
+                placeholder = { Text("https://…") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = { TextButton(onClick = { onImport(url) }, enabled = url.isNotBlank()) { Text("Εισαγωγή") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Ακύρωση") } },
     )
 }

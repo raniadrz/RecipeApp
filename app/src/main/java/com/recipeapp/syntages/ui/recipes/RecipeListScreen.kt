@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
+import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
@@ -79,6 +80,7 @@ import com.recipeapp.syntages.ui.components.RecipePhoto
 fun RecipesRoute(
     onOpenRecipe: (Long) -> Unit,
     onAdd: () -> Unit,
+    onImportUrl: (String) -> Unit,
     onEdit: (Long) -> Unit,
     onCook: (Long) -> Unit,
 ) {
@@ -88,7 +90,7 @@ fun RecipesRoute(
         if (twoPane) {
             Row(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(0.45f).fillMaxHeight()) {
-                    RecipeListScreen(onOpen = { selected = it }, onAdd = onAdd, selectedId = selected, compactGrid = true)
+                    RecipeListScreen(onOpen = { selected = it }, onAdd = onAdd, onImportUrl = onImportUrl, selectedId = selected, compactGrid = true)
                 }
                 VerticalDivider()
                 Box(Modifier.weight(0.55f).fillMaxHeight()) {
@@ -107,17 +109,18 @@ fun RecipesRoute(
                 }
             }
         } else {
-            RecipeListScreen(onOpen = onOpenRecipe, onAdd = onAdd, selectedId = 0L, compactGrid = false)
+            RecipeListScreen(onOpen = onOpenRecipe, onAdd = onAdd, onImportUrl = onImportUrl, selectedId = 0L, compactGrid = false)
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RecipeListScreen(onOpen: (Long) -> Unit, onAdd: () -> Unit, selectedId: Long, compactGrid: Boolean) {
+fun RecipeListScreen(onOpen: (Long) -> Unit, onAdd: () -> Unit, onImportUrl: (String) -> Unit, selectedId: Long, compactGrid: Boolean) {
     val vm = appViewModel { RecipeListViewModel(it.repository) }
     val state by vm.state.collectAsStateWithLifecycle()
     var showFilters by rememberSaveable { mutableStateOf(false) }
+    var webSearch by rememberSaveable { mutableStateOf(false) }
     val f = state.filters
 
     Scaffold(
@@ -126,6 +129,9 @@ fun RecipeListScreen(onOpen: (Long) -> Unit, onAdd: () -> Unit, selectedId: Long
             TopAppBar(
                 title = { Text("Οι Συνταγές μου") },
                 actions = {
+                    IconButton(onClick = { webSearch = true }) {
+                        Icon(Icons.Filled.TravelExplore, contentDescription = "Βρες συνταγή στο internet")
+                    }
                     IconButton(onClick = vm::toggleFavorites) {
                         Icon(
                             if (f.favoritesOnly) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
@@ -180,7 +186,12 @@ fun RecipeListScreen(onOpen: (Long) -> Unit, onAdd: () -> Unit, selectedId: Long
                     Icons.Filled.SearchOff, "Δεν βρέθηκε συνταγή",
                     "Δοκίμασε άλλη λέξη ή καθάρισε τα φίλτρα.",
                 ) {
-                    TextButton(onClick = { vm.setQuery(""); vm.clearFilters() }) { Text("Καθαρισμός φίλτρων") }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Button(onClick = { webSearch = true }) {
+                            Icon(Icons.Filled.TravelExplore, null); Spacer(Modifier.width(8.dp)); Text("Ψάξε στο internet")
+                        }
+                        TextButton(onClick = { vm.setQuery(""); vm.clearFilters() }) { Text("Καθαρισμός φίλτρων") }
+                    }
                 }
                 else -> LazyVerticalGrid(
                     columns = GridCells.Adaptive(if (compactGrid) 260.dp else 300.dp),
@@ -201,6 +212,52 @@ fun RecipeListScreen(onOpen: (Long) -> Unit, onAdd: () -> Unit, selectedId: Long
             }
         }
     }
+    if (webSearch) WebSearchDialog(f.query, onDismiss = { webSearch = false }, onImportUrl = onImportUrl)
+}
+
+@Composable
+private fun WebSearchDialog(initial: String, onDismiss: () -> Unit, onImportUrl: (String) -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var text by rememberSaveable { mutableStateOf(initial) }
+    val link = com.recipeapp.syntages.util.RecipeImporter.extractUrl(text)
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Filled.TravelExplore, null) },
+        title = { Text("Βρες συνταγή στο internet") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = text, onValueChange = { text = it },
+                    label = { Text("Τι θες να μαγειρέψεις; ή επικόλλησε link") },
+                    placeholder = { Text("π.χ. παστίτσιο") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "1. Πάτα «Αναζήτηση» και διάλεξε μια συνταγή στον browser.\n" +
+                        "2. Πάτα «Κοινοποίηση» (⋮ ή το εικονίδιο ⤴) → «Οι Συνταγές μου».\n" +
+                        "3. Η συνταγή συμπληρώνεται αυτόματα — ελέγχεις και αποθηκεύεις.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = text.isNotBlank(),
+                onClick = {
+                    onDismiss()
+                    if (link != null) onImportUrl(link)
+                    else runCatching {
+                        context.startActivity(
+                            android.content.Intent(android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse(com.recipeapp.syntages.util.RecipeImporter.googleSearchUrl(text.trim())))
+                        )
+                    }
+                },
+            ) { Text(if (link != null) "Εισαγωγή" else "Αναζήτηση") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Ακύρωση") } },
+    )
 }
 
 @Composable
