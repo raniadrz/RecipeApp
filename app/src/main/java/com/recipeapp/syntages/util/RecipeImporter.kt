@@ -14,6 +14,9 @@ import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.Charset
 
+/** Το σάιτ απάντησε με κωδικό σφάλματος (π.χ. 403 όταν μπλοκάρει εφαρμογές). */
+class HttpStatusException(val code: Int) : IOException("Η σελίδα απάντησε με σφάλμα $code")
+
 /** Κατεβάζει μια σελίδα συνταγής και τη μετατρέπει σε WebRecipe. Χρειάζεται internet μόνο τη στιγμή της εισαγωγής. */
 object RecipeImporter {
     private const val UA = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36"
@@ -33,10 +36,10 @@ object RecipeImporter {
     }
 
     /** Κατεβάζει τη φωτογραφία και την περνά από το PhotoStore. Επιστρέφει το όνομα αρχείου. */
-    suspend fun downloadImage(context: Context, url: String): String? {
+    suspend fun downloadImage(context: Context, url: String, referer: String? = null): String? {
         val tmp = withContext(Dispatchers.IO) {
             runCatching {
-                val bytes = fetchBytes(url).first
+                val bytes = fetchBytes(url, referer).first
                 File(File(context.cacheDir, "camera").apply { mkdirs() }, "web_${System.currentTimeMillis()}.img")
                     .apply { writeBytes(bytes) }
             }.getOrNull()
@@ -53,7 +56,7 @@ object RecipeImporter {
         return String(bytes, cs)
     }
 
-    private fun fetchBytes(start: String): Pair<ByteArray, String?> {
+    private fun fetchBytes(start: String, referer: String? = null): Pair<ByteArray, String?> {
         var current = start
         repeat(6) {
             val conn = (URL(current).openConnection() as HttpURLConnection).apply {
@@ -63,6 +66,7 @@ object RecipeImporter {
                 setRequestProperty("User-Agent", UA)
                 setRequestProperty("Accept", "text/html,application/xhtml+xml,image/*,*/*;q=0.8")
                 setRequestProperty("Accept-Language", "el-GR,el;q=0.9,en;q=0.7")
+                if (referer != null) setRequestProperty("Referer", referer)
             }
             try {
                 val code = conn.responseCode
@@ -71,7 +75,7 @@ object RecipeImporter {
                     current = URL(URL(current), loc).toString()
                     return@repeat
                 }
-                if (code !in 200..299) throw IOException("Η σελίδα απάντησε με σφάλμα $code")
+                if (code !in 200..299) throw HttpStatusException(code)
                 val out = ByteArrayOutputStream()
                 conn.inputStream.use { input ->
                     val buf = ByteArray(16 * 1024)

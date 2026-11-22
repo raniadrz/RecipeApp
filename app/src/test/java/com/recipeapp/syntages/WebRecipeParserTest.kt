@@ -69,6 +69,32 @@ class WebRecipeParserTest {
         assertTrue(!r.isComplete)
     }
 
+    @Test fun readsHeadingsWhenNoStructuredData() {
+        val html = """
+            <html><head><meta property="og:title" content="Το παστίτσιο του Άκη | Akis Petretzikis">
+            <meta property="og:image" content="https://x.gr/p.jpg"><script>var a = "<li>όχι</li>";</script></head>
+            <body><nav><ul><li>Συνταγές</li><li>Εκτέλεση</li></ul></nav>
+            <h1>Το παστίτσιο του Άκη</h1>
+            <div class="ingredients"><h2>Υλικά</h2>
+              <h3>Για τον κιμά</h3>
+              <ul><li><span>500 γρ.</span> <span>κιμά μοσχαρίσιο</span></li><li>1 ξερό κρεμμύδι</li></ul>
+              <h3>Για τη μπεσαμέλ</h3>
+              <ul><li>1 λίτρο γάλα</li><li>100 γρ. βούτυρο</li></ul></div>
+            <div><h2>Εκτέλεση</h2><ol>
+              <li>Σε μια κατσαρόλα σοτάρουμε το κρεμμύδι για 5 λεπτά.</li>
+              <li>Προσθέτουμε τον κιμά και μαγειρεύουμε για 20 λεπτά.</li></ol></div>
+            <h2>Σχόλια</h2><p>Πολύ ωραίο φαγητό, το έφτιαξα χθες για όλη την οικογένεια!</p>
+            </body></html>
+        """.trimIndent()
+        val r = WebRecipeParser.parse(html, "https://x.gr/pastitsio")!!
+        assertEquals("Το παστίτσιο του Άκη", r.title)
+        assertEquals("https://x.gr/p.jpg", r.imageUrl)
+        assertEquals(listOf("500 γρ. κιμά μοσχαρίσιο", "1 ξερό κρεμμύδι", "1 λίτρο γάλα", "100 γρ. βούτυρο"), r.ingredients)
+        assertEquals(2, r.steps.size)
+        assertTrue(r.steps[0].startsWith("Σε μια κατσαρόλα"))
+        assertTrue(r.isComplete)
+    }
+
     @Test fun durations() {
         assertEquals(90, WebRecipeParser.minutes("PT1H30M"))
         assertEquals(45, WebRecipeParser.minutes("PT45M"))

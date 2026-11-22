@@ -72,6 +72,11 @@ class RecipeEditViewModel(private val app: Application, private val repo: Recipe
     private var sourceUrl: String? = null
     var autoImportDone = false
 
+    /** Όταν το σάιτ μπλοκάρει την απευθείας λήψη, ανοίγουμε τη σελίδα σε ενσωματωμένο browser. */
+    var browserImportUrl by mutableStateOf<String?>(null)
+        private set
+    private var partial: WebRecipe? = null
+
     /** Φωτογραφίες που δημιουργήθηκαν σε αυτή την επεξεργασία (για καθαρισμό αν δεν αποθηκευτούν). */
     private val newPhotos = mutableSetOf<String>()
     private var saved = false
@@ -158,17 +163,52 @@ class RecipeEditViewModel(private val app: Application, private val repo: Recipe
         }
         importing = true
         importError = null
+        partial = null
         viewModelScope.launch {
             runCatching { RecipeImporter.load(url) }
-                .onSuccess { apply(it) }
-                .onFailure {
-                    importError = "Δεν ήταν δυνατή η εισαγωγή: ${it.message ?: "χωρίς σύνδεση στο internet;"}"
+                .onSuccess {
+                    if (it.isComplete) { apply(it); importing = false }
+                    else { partial = it; browserImportUrl = url } // ίσως τα υλικά φορτώνονται με JavaScript
                 }
+                .onFailure { e ->
+                    val blocked = e is com.recipeapp.syntages.util.HttpStatusException && e.code in setOf(401, 403, 405, 406, 429, 503)
+                    val notFound = e is com.recipeapp.syntages.util.HttpStatusException && (e.code == 404 || e.code == 410)
+                    if (notFound) {
+                        importError = "Η σελίδα δεν βρέθηκε (σφάλμα ${e.code}). Έλεγξε ότι το link είναι σωστό."
+                        importing = false
+                    } else if (blocked || e !is java.net.UnknownHostException) {
+                        browserImportUrl = url
+                    } else {
+                        importError = "Δεν υπάρχει σύνδεση στο internet."
+                        importing = false
+                    }
+                }
+        }
+    }
+
+    /** Αποτέλεσμα από τον ενσωματωμένο browser (html == null: ακυρώθηκε ή δεν βρέθηκε συνταγή). */
+    fun onBrowserResult(html: String?, finalUrl: String?) {
+        val url = browserImportUrl ?: return
+        browserImportUrl = null
+        val parsed = html?.let { com.recipeapp.syntages.domain.WebRecipeParser.parse(it, url) }
+        val best = when {
+            parsed?.isComplete == true -> parsed
+            partial != null -> partial
+            else -> parsed
+        }
+        partial = null
+        if (best == null) {
+            importError = "Δεν βρέθηκε συνταγή σε αυτή τη σελίδα. Δοκίμασε άλλη σελίδα ή γράψε τη συνταγή με «Επικόλληση»."
+            importing = false
+            return
+        }
+        viewModelScope.launch {
+            apply(best, referer = finalUrl ?: url)
             importing = false
         }
     }
 
-    private suspend fun apply(w: WebRecipe) {
+    private suspend fun apply(w: WebRecipe, referer: String? = w.sourceUrl) {
         if (w.title.isNotBlank()) title = w.title
         w.category?.let { category = it }
         if (w.prepMinutes > 0) prep = w.prepMinutes.toString()
@@ -193,7 +233,7 @@ class RecipeEditViewModel(private val app: Application, private val repo: Recipe
             "Βρέθηκε μόνο ο τίτλος — η σελίδα δεν έχει τα υλικά σε μορφή που διαβάζεται. Συμπλήρωσέ τα με «Επικόλληση»."
         w.imageUrl?.let { img ->
             photoBusy = true
-            val name = RecipeImporter.downloadImage(app, img)
+            val name = RecipeImporter.downloadImage(app, img, referer)
             if (name != null) {
                 photo?.let { if (it in newPhotos) { PhotoStore.delete(app, it); newPhotos.remove(it) } }
                 newPhotos += name

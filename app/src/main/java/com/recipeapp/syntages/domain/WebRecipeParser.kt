@@ -41,11 +41,64 @@ object WebRecipeParser {
             val obj = findRecipe(el, 0) ?: continue
             return fromJsonLd(obj, url)
         }
-        // Χωρίς δομημένα δεδομένα: κρατάμε τουλάχιστον τίτλο και φωτογραφία.
+        // Χωρίς δομημένα δεδομένα: ψάχνουμε τις ενότητες «Υλικά» / «Εκτέλεση» μέσα στη σελίδα,
+        // αλλιώς κρατάμε τουλάχιστον τίτλο και φωτογραφία.
         val title = meta(html, "og:title")
+            ?: Regex("<h1[^>]*>(.*?)</h1>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)).find(html)?.groupValues?.get(1)
             ?: Regex("<title[^>]*>(.*?)</title>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)).find(html)?.groupValues?.get(1)
-        val t = title?.let { clean(it) }?.takeIf { it.isNotBlank() } ?: return null
-        return WebRecipe(t, meta(html, "og:image")?.let { decodeEntities(it) }, emptyList(), emptyList(), 0, 0, null, null, emptyList(), url)
+        val t = title?.let { clean(it) }?.substringBefore(" | ")?.takeIf { it.isNotBlank() } ?: return null
+        val (ings, steps) = fromHeadings(html)
+        return WebRecipe(
+            t, meta(html, "og:image")?.let { decodeEntities(it) }, ings, steps, 0, 0, null,
+            mapCategory(t), emptyList(), url,
+        )
+    }
+
+    private val ingredientHeader = Regex("^(τα )?υλικα( για.*)?:?$")
+    private val stepsHeader = Regex("^(η )?(εκτελεση|οδηγιεσ|διαδικασια|παρασκευη|τροποσ παρασκευησ|βηματα|πωσ το φτιαχνουμε|μεθοδοσ)( .*)?:?$")
+    private val stopHeader = Regex("^(σχολια|tips|συμβουλ|μυστικ|διατροφικ|θερμιδ|δεσ επισησ|σχετικεσ|μπορει να σασ|κοινοποιη|share|ετικετεσ|tags|βαθμολογ|αξιολογ|αλλεσ συνταγεσ|νεεσ συνταγεσ|δημοφιλ).*")
+
+    /** Μετατρέπει το HTML σε γραμμές κειμένου· τα στοιχεία λίστας ξεκινούν με «• ». */
+    private fun htmlLines(html: String): List<String> {
+        val body = html
+            .replace(Regex("<(script|style|noscript|svg|nav|footer|header)[^>]*>.*?</\\1>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), " ")
+            .replace(Regex("<li[^>]*>", RegexOption.IGNORE_CASE), "\n• ")
+            .replace(Regex("<(h[1-6])[^>]*>", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("</(li|p|div|h[1-6]|tr|section|ul|ol|label)>", RegexOption.IGNORE_CASE), "\n")
+        return clean(body).split('\n').map { it.trim() }.filter { it.isNotEmpty() && it != "•" }
+    }
+
+    /** Βρίσκει τις λίστες κάτω από τίτλους «Υλικά» και «Εκτέλεση». */
+    fun fromHeadings(html: String): Pair<List<String>, List<String>> {
+        val lines = htmlLines(html)
+        fun header(line: String, re: Regex) = line.length <= 40 && re.matches(Text.normalize(line.removePrefix("• ")))
+        val ings = mutableListOf<String>()
+        val steps = mutableListOf<String>()
+        val iStart = lines.indexOfFirst { header(it, ingredientHeader) }
+        if (iStart >= 0) {
+            var i = iStart + 1
+            while (i < lines.size && ings.size < 60) {
+                val l = lines[i]
+                if (header(l, stepsHeader) || header(l, stopHeader)) break
+                if (l.startsWith("• ")) {
+                    val text = l.removePrefix("• ").trim()
+                    if (text.length in 2..150) ings += text
+                } else if (ings.isNotEmpty() && l.length > 60) break // τέλος λίστας: ξεκίνησε κανονικό κείμενο
+                i++
+            }
+        }
+        val sStart = lines.indexOfFirst { header(it, stepsHeader) }.let { if (it < 0) -1 else it }
+        if (sStart >= 0) {
+            var i = sStart + 1
+            while (i < lines.size && steps.size < 40) {
+                val l = lines[i]
+                if (header(l, stopHeader) || (steps.isNotEmpty() && header(l, ingredientHeader))) break
+                val text = l.removePrefix("• ").replace(Regex("^\\d+[.)]?\\s*"), "").trim()
+                if (text.length >= 15) steps += text
+                i++
+            }
+        }
+        return ings to steps
     }
 
     private fun meta(html: String, prop: String): String? {

@@ -136,7 +136,7 @@ fun SettingsScreen() {
                     Icon(Icons.Filled.Info, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "Οι Συνταγές μου · έκδοση 1.1\nΔουλεύει χωρίς internet (εκτός από την εισαγωγή από link). Όλα τα δεδομένα μένουν στη συσκευή σου.",
+                        "Οι Συνταγές μου · έκδοση 1.2\nΔουλεύει χωρίς internet (εκτός από την εισαγωγή από link). Όλα τα δεδομένα μένουν στη συσκευή σου.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }

@@ -191,6 +191,9 @@ fun RecipeEditScreen(recipeId: Long, importUrl: String? = null, onDone: (savedId
             dismissButton = { TextButton(onClick = { confirmExit = false }) { Text("Συνέχεια επεξεργασίας") } },
         )
     }
+    vm.browserImportUrl?.let { url ->
+        BrowserImportDialog(url) { html, finalUrl -> vm.onBrowserResult(html, finalUrl) }
+    }
     if (linkDialog) {
         LinkDialog(
             onDismiss = { linkDialog = false },
