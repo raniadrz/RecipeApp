@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Ατμός -->
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="3" android:strokeLineCap="round"
+        android:pathData="M44,30 C40,34 48,38 44,42" />
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="3" android:strokeLineCap="round"
+        android:pathData="M54,27 C50,31 58,35 54,39" />
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="3" android:strokeLineCap="round"
+        android:pathData="M64,30 C60,34 68,38 64,42" />
+    <!-- Καπάκι -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M32,50 L76,50 C76,47 74,46 72,46 L36,46 C34,46 32,47 32,50 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M50,42 L58,42 L58,46 L50,46 Z" />
+    <!-- Κατσαρόλα -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M34,53 L74,53 L72,74 C71.6,77 69.6,79 66.6,79 L41.4,79 C38.4,79 36.4,77 36,74 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M26,56 L34,56 L34,61 L26,61 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M74,56 L82,56 L82,61 L74,61 Z" />
+</vector>

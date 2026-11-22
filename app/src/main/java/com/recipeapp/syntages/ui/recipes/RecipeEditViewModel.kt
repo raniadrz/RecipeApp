@@ -1,0 +1,186 @@
+package com.recipeapp.syntages.ui.recipes
+
+import android.app.Application
+import android.net.Uri
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.recipeapp.syntages.data.Ingredient
+import com.recipeapp.syntages.data.Recipe
+import com.recipeapp.syntages.data.RecipeRepository
+import com.recipeapp.syntages.domain.Catalog
+import com.recipeapp.syntages.domain.IngredientParser
+import com.recipeapp.syntages.domain.Sections
+import com.recipeapp.syntages.domain.Text
+import com.recipeapp.syntages.domain.Units
+import com.recipeapp.syntages.util.PhotoStore
+import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicLong
+
+class IngredientDraft(name: String = "", qty: String = "", unit: String = "", section: String = "", sectionManual: Boolean = false) {
+    val key: Long = counter.incrementAndGet()
+    var name by mutableStateOf(name)
+    var qty by mutableStateOf(qty)
+    var unit by mutableStateOf(unit)
+    var section by mutableStateOf(section)
+    var sectionManual by mutableStateOf(sectionManual)
+
+    fun updateName(n: String) {
+        name = n
+        if (!sectionManual) section = Sections.guess(n)
+    }
+
+    companion object { private val counter = AtomicLong() }
+}
+
+class StepDraft(text: String = "") {
+    val key: Long = counter.incrementAndGet()
+    var text by mutableStateOf(text)
+    companion object { private val counter = AtomicLong() }
+}
+
+class RecipeEditViewModel(private val app: Application, private val repo: RecipeRepository, val id: Long) : ViewModel() {
+    var loaded by mutableStateOf(id == 0L)
+        private set
+    private var original: Recipe? = null
+
+    var title by mutableStateOf("")
+    var category by mutableStateOf(Catalog.categories[3])
+    var prep by mutableStateOf("")
+    var cook by mutableStateOf("")
+    var servings by mutableStateOf("4")
+    var difficulty by mutableStateOf(0)
+    val tags = mutableStateListOf<String>()
+    var photo by mutableStateOf<String?>(null)
+        private set
+    var photoBusy by mutableStateOf(false)
+        private set
+    val ingredients = mutableStateListOf<IngredientDraft>()
+    val steps = mutableStateListOf<StepDraft>()
+    var titleError by mutableStateOf(false)
+
+    /** Φωτογραφίες που δημιουργήθηκαν σε αυτή την επεξεργασία (για καθαρισμό αν δεν αποθηκευτούν). */
+    private val newPhotos = mutableSetOf<String>()
+    private var saved = false
+
+    init {
+        if (id != 0L) {
+            viewModelScope.launch {
+                repo.getRecipe(id)?.let { r ->
+                    val rec = r.recipe
+                    original = rec
+                    title = rec.title
+                    category = rec.category
+                    prep = if (rec.prepMinutes > 0) rec.prepMinutes.toString() else ""
+                    cook = if (rec.cookMinutes > 0) rec.cookMinutes.toString() else ""
+                    servings = rec.servings.toString()
+                    difficulty = rec.difficulty
+                    tags.addAll(rec.tags)
+                    photo = rec.photoPath
+                    r.ingredients.forEach {
+                        ingredients += IngredientDraft(it.name, Text.formatQuantity(it.quantity), it.unit, it.section, sectionManual = true)
+                    }
+                    rec.steps.forEach { steps += StepDraft(it) }
+                }
+                if (ingredients.isEmpty()) ingredients += IngredientDraft()
+                if (steps.isEmpty()) steps += StepDraft()
+                loaded = true
+            }
+        } else {
+            ingredients += IngredientDraft()
+            steps += StepDraft()
+        }
+    }
+
+    fun toggleTag(t: String) { if (t in tags) tags.remove(t) else tags.add(t) }
+
+    fun addIngredient() { ingredients += IngredientDraft() }
+    fun removeIngredient(d: IngredientDraft) { ingredients.remove(d) }
+
+    fun addParsedIngredients(text: String) {
+        val parsed = IngredientParser.parseLines(text)
+        ingredients.removeAll { it.name.isBlank() && it.qty.isBlank() }
+        parsed.forEach {
+            ingredients += IngredientDraft(it.name, Text.formatQuantity(it.quantity), it.unit, Sections.guess(it.name))
+        }
+        if (ingredients.isEmpty()) ingredients += IngredientDraft()
+    }
+
+    fun addStep() { steps += StepDraft() }
+    fun removeStep(s: StepDraft) { steps.remove(s) }
+    fun moveStep(s: StepDraft, delta: Int) {
+        val i = steps.indexOf(s)
+        val j = i + delta
+        if (i < 0 || j !in steps.indices) return
+        steps.removeAt(i)
+        steps.add(j, s)
+    }
+
+    fun addParsedSteps(text: String) {
+        val lines = text.lines().map { it.replace(Regex("^\\s*(\\d+[.)]|[•\\-*])\\s*"), "").trim() }.filter { it.isNotEmpty() }
+        steps.removeAll { it.text.isBlank() }
+        lines.forEach { steps += StepDraft(it) }
+        if (steps.isEmpty()) steps += StepDraft()
+    }
+
+    fun setPhotoFromUri(uri: Uri, deleteSource: java.io.File? = null) {
+        photoBusy = true
+        viewModelScope.launch {
+            val name = PhotoStore.import(app, uri)
+            deleteSource?.delete()
+            if (name != null) {
+                // Αν η προηγούμενη φωτογραφία ήταν νέα (μη αποθηκευμένη), σβήσ' την.
+                photo?.let { if (it in newPhotos) { PhotoStore.delete(app, it); newPhotos.remove(it) } }
+                newPhotos += name
+                photo = name
+            }
+            photoBusy = false
+        }
+    }
+
+    fun removePhoto() {
+        photo?.let { if (it in newPhotos) { PhotoStore.delete(app, it); newPhotos.remove(it) } }
+        photo = null
+    }
+
+    fun save(onSaved: (Long) -> Unit) {
+        if (title.isBlank()) { titleError = true; return }
+        val ings = ingredients.filter { it.name.isNotBlank() }.map {
+            Ingredient(
+                name = it.name.trim(),
+                quantity = Text.parseQuantity(it.qty),
+                unit = Units.normalizeUnit(it.unit),
+                section = it.section.ifBlank { Sections.guess(it.name) },
+            )
+        }
+        val base = original ?: Recipe(title = "", category = category)
+        val recipe = base.copy(
+            title = title.trim(),
+            category = category,
+            prepMinutes = prep.filter(Char::isDigit).toIntOrNull() ?: 0,
+            cookMinutes = cook.filter(Char::isDigit).toIntOrNull() ?: 0,
+            servings = (servings.filter(Char::isDigit).toIntOrNull() ?: 4).coerceIn(1, 100),
+            difficulty = difficulty,
+            tags = Catalog.tags.filter { it in tags },
+            photoPath = photo,
+            steps = steps.map { it.text.trim() }.filter { it.isNotEmpty() },
+        )
+        viewModelScope.launch {
+            val newId = repo.saveRecipe(recipe, ings)
+            saved = true
+            val old = original?.photoPath
+            if (old != null && old != photo) PhotoStore.delete(app, old)
+            newPhotos.remove(photo)
+            newPhotos.forEach { PhotoStore.delete(app, it) }
+            newPhotos.clear()
+            onSaved(newId)
+        }
+    }
+
+    override fun onCleared() {
+        if (!saved) newPhotos.forEach { PhotoStore.delete(app, it) }
+    }
+}
